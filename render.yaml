@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: line-krw-twd-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    autoDeploy: true
+    envVars:
+      - key: BASE_CURRENCY
+        value: KRW
+      - key: TARGET_CURRENCY
+        value: TWD
+      - key: FX_API_URL_TEMPLATE
+        value: https://open.er-api.com/v6/latest/{base}
