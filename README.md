@@ -133,4 +133,4 @@ https://line-krw-twd-bot.onrender.com/callback
 4. 在群組輸入一次 `10000 krw`
 5. 等你確認 Bot 已正常回應後，再決定要不要加上群組白名單限制
 
-如果你要，我下一步可以直接幫你整理成「Render 從 GitHub 建立服務」的超短操作清單。
+
