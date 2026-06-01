@@ -6,16 +6,26 @@ from decimal import Decimal, ROUND_HALF_UP
 import requests
 from flask import Flask, abort, jsonify, request
 
-from core import parse_amount, verify_line_signature
+from core import parse_conversion_request, verify_line_signature
 
 
 LINE_REPLY_API = "https://api.line.me/v2/bot/message/reply"
-BASE_CURRENCY = os.getenv("BASE_CURRENCY", "KRW").upper()
-TARGET_CURRENCY = os.getenv("TARGET_CURRENCY", "TWD").upper()
 FX_API_URL_TEMPLATE = os.getenv(
     "FX_API_URL_TEMPLATE", "https://open.er-api.com/v6/latest/{base}"
 )
 ALLOWED_GROUP_ID = os.getenv("ALLOWED_GROUP_ID", "").strip()
+
+DEFAULT_SOURCE_CURRENCY = os.getenv("BASE_CURRENCY", "KRW").upper()
+DEFAULT_TARGET_CURRENCY = os.getenv("TARGET_CURRENCY", "TWD").upper()
+SUPPORTED_CURRENCIES = {"KRW", "TWD"}
+CURRENCY_LABELS = {
+    "KRW": "韓幣",
+    "TWD": "台幣",
+}
+QUICK_REPLY_SAMPLES = {
+    "KRW": [("換算 10,000 KRW", "10000 krw"), ("換算 50,000 KRW", "50000 krw")],
+    "TWD": [("換算 1,000 TWD", "1000 twd"), ("換算 5,000 TWD", "5000 twd")],
+}
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
@@ -45,31 +55,47 @@ def format_decimal(value: Decimal, places: str) -> str:
     return f"{quantized:,}"
 
 
-def build_reply_message(amount_krw: Decimal) -> str:
-    rate, updated_at = fetch_exchange_rate(BASE_CURRENCY, TARGET_CURRENCY)
-    converted = amount_krw * rate
+def get_target_currency(source_currency: str) -> str:
+    if source_currency == "KRW":
+        return "TWD"
+    if source_currency == "TWD":
+        return "KRW"
+    raise ValueError(f"Unsupported source currency: {source_currency}")
+
+
+def build_title(source_currency: str, target_currency: str) -> str:
+    return f"{CURRENCY_LABELS[source_currency]}轉{CURRENCY_LABELS[target_currency]}"
+
+
+def build_reply_message(amount: Decimal, source_currency: str) -> str:
+    target_currency = get_target_currency(source_currency)
+    rate, updated_at = fetch_exchange_rate(source_currency, target_currency)
+    converted = amount * rate
 
     return (
-        f"韓幣轉台幣\n"
-        f"{format_decimal(amount_krw, '1')} {BASE_CURRENCY} = "
-        f"{format_decimal(converted, '0.01')} {TARGET_CURRENCY}\n"
-        f"參考匯率: 1 {BASE_CURRENCY} = {format_decimal(rate, '0.0001')} {TARGET_CURRENCY}\n"
+        f"{build_title(source_currency, target_currency)}\n"
+        f"{format_decimal(amount, '1')} {source_currency} = "
+        f"{format_decimal(converted, '0.01')} {target_currency}\n"
+        f"參考匯率: 1 {source_currency} = {format_decimal(rate, '0.0001')} {target_currency}\n"
         f"更新時間: {updated_at}"
     )
 
 
-def build_flex_message(amount_krw: Decimal) -> dict:
-    rate, updated_at = fetch_exchange_rate(BASE_CURRENCY, TARGET_CURRENCY)
-    converted = amount_krw * rate
-    amount_text = format_decimal(amount_krw, "1")
+def build_flex_message(amount: Decimal, source_currency: str) -> dict:
+    target_currency = get_target_currency(source_currency)
+    rate, updated_at = fetch_exchange_rate(source_currency, target_currency)
+    converted = amount * rate
+    amount_text = format_decimal(amount, "1")
     converted_text = format_decimal(converted, "0.01")
     rate_text = format_decimal(rate, "0.0001")
+    title = build_title(source_currency, target_currency)
+    samples = QUICK_REPLY_SAMPLES[source_currency]
 
     return {
         "type": "flex",
         "altText": (
-            f"韓幣轉台幣: {amount_text} {BASE_CURRENCY} = "
-            f"{converted_text} {TARGET_CURRENCY}"
+            f"{title}: {amount_text} {source_currency} = "
+            f"{converted_text} {target_currency}"
         ),
         "contents": {
             "type": "bubble",
@@ -82,14 +108,14 @@ def build_flex_message(amount_krw: Decimal) -> dict:
                 "contents": [
                     {
                         "type": "text",
-                        "text": "KRW -> TWD",
+                        "text": f"{source_currency} -> {target_currency}",
                         "color": "#DDF4E7",
                         "size": "sm",
                         "weight": "bold",
                     },
                     {
                         "type": "text",
-                        "text": "韓幣轉台幣",
+                        "text": title,
                         "color": "#FFFFFF",
                         "size": "xl",
                         "weight": "bold",
@@ -113,13 +139,13 @@ def build_flex_message(amount_krw: Decimal) -> dict:
                         "contents": [
                             {
                                 "type": "text",
-                                "text": f"{amount_text} {BASE_CURRENCY}",
+                                "text": f"{amount_text} {source_currency}",
                                 "size": "md",
                                 "color": "#5C6B73",
                             },
                             {
                                 "type": "text",
-                                "text": f"{converted_text} {TARGET_CURRENCY}",
+                                "text": f"{converted_text} {target_currency}",
                                 "size": "xxl",
                                 "weight": "bold",
                                 "color": "#0B6E4F",
@@ -145,7 +171,7 @@ def build_flex_message(amount_krw: Decimal) -> dict:
                                     },
                                     {
                                         "type": "text",
-                                        "text": f"1 {BASE_CURRENCY} = {rate_text} {TARGET_CURRENCY}",
+                                        "text": f"1 {source_currency} = {rate_text} {target_currency}",
                                         "size": "sm",
                                         "color": "#111111",
                                         "align": "end",
@@ -193,8 +219,8 @@ def build_flex_message(amount_krw: Decimal) -> dict:
                         "color": "#0B6E4F",
                         "action": {
                             "type": "message",
-                            "label": "換算 10,000 KRW",
-                            "text": "10000 krw",
+                            "label": samples[0][0],
+                            "text": samples[0][1],
                         },
                     },
                     {
@@ -203,8 +229,8 @@ def build_flex_message(amount_krw: Decimal) -> dict:
                         "height": "sm",
                         "action": {
                             "type": "message",
-                            "label": "換算 50,000 KRW",
-                            "text": "50000 krw",
+                            "label": samples[1][0],
+                            "text": samples[1][1],
                         },
                     },
                 ],
@@ -216,7 +242,7 @@ def build_flex_message(amount_krw: Decimal) -> dict:
 def build_help_message() -> dict:
     return {
         "type": "text",
-        "text": "請輸入韓幣金額，例如:\n10000 krw\nkrw 25000",
+        "text": "請輸入金額與幣別，例如:\n10000 krw\nkrw 25000\n1000 twd\ntwd 5000",
         "quickReply": {
             "items": [
                 {
@@ -231,8 +257,8 @@ def build_help_message() -> dict:
                     "type": "action",
                     "action": {
                         "type": "message",
-                        "label": "50,000 KRW",
-                        "text": "50000 krw",
+                        "label": "1,000 TWD",
+                        "text": "1000 twd",
                     },
                 },
             ]
@@ -275,7 +301,14 @@ def is_allowed_source(event: dict) -> bool:
 
 @app.get("/health")
 def healthcheck():
-    return jsonify({"ok": True, "base": BASE_CURRENCY, "target": TARGET_CURRENCY})
+    return jsonify(
+        {
+            "ok": True,
+            "default_source": DEFAULT_SOURCE_CURRENCY,
+            "default_target": DEFAULT_TARGET_CURRENCY,
+            "supported_currencies": sorted(SUPPORTED_CURRENCIES),
+        }
+    )
 
 
 @app.post("/callback")
@@ -308,20 +341,22 @@ def callback():
 
         text = event.get("message", {}).get("text", "")
         reply_token = event.get("replyToken")
-        amount = parse_amount(text)
+        parsed = parse_conversion_request(text)
 
         if not reply_token:
             continue
 
-        if amount is None:
+        if parsed is None:
             try:
                 send_line_reply(reply_token, [build_help_message()])
             except Exception:
                 logger.exception("Failed to send help message reply")
             continue
 
+        amount, source_currency = parsed
+
         try:
-            send_line_reply(reply_token, [build_flex_message(amount)])
+            send_line_reply(reply_token, [build_flex_message(amount, source_currency)])
         except Exception:
             logger.exception("Failed to build or send FX reply")
             fallback = {

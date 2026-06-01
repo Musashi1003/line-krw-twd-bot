@@ -7,7 +7,9 @@ from typing import Optional
 
 
 MESSAGE_PATTERN = re.compile(
-    r"^\s*(?:(?P<currency1>krw)\s*)?(?P<amount>[\d,]+(?:\.\d+)?)\s*(?:(?P<currency2>krw)|원|韓元)?\s*$",
+    r"^\s*(?:(?P<currency1>krw|twd)\s*)?"
+    r"(?P<amount>[\d,]+(?:\.\d+)?)"
+    r"\s*(?:(?P<currency2>krw|twd))?\s*$",
     re.IGNORECASE,
 )
 
@@ -20,14 +22,18 @@ def verify_line_signature(body: bytes, signature: str, channel_secret: str) -> b
     return hmac.compare_digest(expected_signature, signature)
 
 
-def parse_amount(text: str) -> Optional[Decimal]:
+def parse_conversion_request(text: str) -> Optional[tuple[Decimal, str]]:
     match = MESSAGE_PATTERN.match(text or "")
     if not match:
         return None
 
-    if not match.group("currency1") and not match.group("currency2"):
-        if not any(char.isdigit() for char in text):
-            return None
+    currency1 = (match.group("currency1") or "").upper()
+    currency2 = (match.group("currency2") or "").upper()
+
+    if currency1 and currency2 and currency1 != currency2:
+        return None
+
+    source_currency = currency1 or currency2 or "KRW"
 
     normalized = match.group("amount").replace(",", "")
     try:
@@ -37,4 +43,12 @@ def parse_amount(text: str) -> Optional[Decimal]:
 
     if amount <= 0:
         return None
-    return amount
+
+    return amount, source_currency
+
+
+def parse_amount(text: str) -> Optional[Decimal]:
+    parsed = parse_conversion_request(text)
+    if parsed is None:
+        return None
+    return parsed[0]
