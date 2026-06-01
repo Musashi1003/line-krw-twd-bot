@@ -1,4 +1,5 @@
-﻿import os
+import logging
+import os
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -17,6 +18,7 @@ FX_API_URL_TEMPLATE = os.getenv(
 ALLOWED_GROUP_ID = os.getenv("ALLOWED_GROUP_ID", "").strip()
 
 app = Flask(__name__)
+logger = logging.getLogger(__name__)
 
 
 def fetch_exchange_rate(base_currency: str, target_currency: str) -> tuple[Decimal, str]:
@@ -252,6 +254,12 @@ def send_line_reply(reply_token: str, messages: list[dict]) -> None:
         "messages": messages,
     }
     response = requests.post(LINE_REPLY_API, json=payload, headers=headers, timeout=10)
+    if not response.ok:
+        logger.error(
+            "LINE reply failed: status=%s body=%s",
+            response.status_code,
+            response.text,
+        )
     response.raise_for_status()
 
 
@@ -277,6 +285,7 @@ def callback():
     body = request.get_data()
 
     if not channel_secret or not verify_line_signature(body, signature, channel_secret):
+        logger.warning("Rejected callback due to invalid LINE signature")
         abort(400, description="Invalid LINE signature")
 
     payload = request.get_json(silent=True) or {}
@@ -288,6 +297,13 @@ def callback():
         if event.get("message", {}).get("type") != "text":
             continue
         if not is_allowed_source(event):
+            source = event.get("source") or {}
+            logger.info(
+                "Ignored event from source_type=%s group_id=%s user_id=%s",
+                source.get("type"),
+                source.get("groupId"),
+                source.get("userId"),
+            )
             continue
 
         text = event.get("message", {}).get("text", "")
@@ -298,17 +314,24 @@ def callback():
             continue
 
         if amount is None:
-            send_line_reply(reply_token, [build_help_message()])
+            try:
+                send_line_reply(reply_token, [build_help_message()])
+            except Exception:
+                logger.exception("Failed to send help message reply")
             continue
 
         try:
             send_line_reply(reply_token, [build_flex_message(amount)])
         except Exception:
+            logger.exception("Failed to build or send FX reply")
             fallback = {
                 "type": "text",
                 "text": "目前暫時無法取得匯率，請稍後再試。",
             }
-            send_line_reply(reply_token, [fallback])
+            try:
+                send_line_reply(reply_token, [fallback])
+            except Exception:
+                logger.exception("Failed to send fallback reply")
 
     return "OK"
 

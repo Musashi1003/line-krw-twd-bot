@@ -1,4 +1,4 @@
-﻿# LINE 韓幣轉台幣機器人
+# LINE 韓幣轉台幣機器人
 
 這是一個用 Python 製作的 LINE Bot。把 Bot 加進指定群組後，成員只要輸入韓幣金額，例如 `10000 krw`，機器人就會用 Flex Message 卡片回覆換算後的台幣金額。
 
@@ -133,4 +133,25 @@ https://line-krw-twd-bot.onrender.com/callback
 4. 在群組輸入一次 `10000 krw`
 5. 等你確認 Bot 已正常回應後，再決定要不要加上群組白名單限制
 
+## 常見故障排查
 
+如果 Bot 完全沒有回覆，先檢查這幾項:
+
+1. Render 服務是否存活  
+   打開 `https://line-krw-twd-bot.onrender.com/health`
+2. LINE Webhook URL 是否仍是 `https://line-krw-twd-bot.onrender.com/callback`
+3. `LINE_CHANNEL_ACCESS_TOKEN` 是否仍有效  
+   不同類型 token 的有效期不同，如果你當初不是用 long-lived token，過期後 Bot 會收得到 webhook 但回不出去。
+4. `LINE_CHANNEL_SECRET` 是否和 LINE Developers Console 目前顯示的一致  
+   如果 secret 換過但 Render 環境變數沒更新，Webhook 驗章會直接失敗。
+5. `ALLOWED_GROUP_ID` 是否限制了來源  
+   目前程式碼在有設定 `ALLOWED_GROUP_ID` 時，只允許指定群組使用；直接私訊 Bot 不會回覆。
+6. Render Free 方案的冷啟動  
+   Render Free web service 閒置 15 分鐘會 spin down，而 LINE reply token 必須在 1 分鐘內使用；服務睡著時，第一則訊息可能來不及回覆。
+
+建議直接到 Render 的 Logs 看這版程式新增的關鍵字:
+
+- `Rejected callback due to invalid LINE signature`
+- `LINE reply failed`
+- `Ignored event from source_type=...`
+- `Failed to build or send FX reply`
