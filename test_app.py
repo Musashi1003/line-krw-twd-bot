@@ -20,7 +20,6 @@ class AppTests(unittest.TestCase):
         self.assertEqual(parse_conversion_request("10000 krw"), (Decimal("10000"), "KRW"))
         self.assertEqual(parse_conversion_request("twd 2500"), (Decimal("2500"), "TWD"))
         self.assertEqual(parse_conversion_request("1500"), (Decimal("1500"), "KRW"))
-
     def test_parse_amount_rejects_invalid_inputs(self):
         self.assertIsNone(parse_amount("hello"))
         self.assertIsNone(parse_amount("-100 krw"))
@@ -32,7 +31,6 @@ class AppTests(unittest.TestCase):
         digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).digest()
         signature = base64.b64encode(digest).decode("utf-8")
         self.assertTrue(verify_line_signature(body, signature, secret))
-
     def test_build_flex_message_contains_expected_shape(self):
         with patch(
             "app.fetch_exchange_rate",
